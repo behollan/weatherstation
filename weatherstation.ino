@@ -47,18 +47,37 @@ Renamed some ambiguous variables to accommodate further sensor development
 
 #define TRUE 1			//Allow us to use TRUE to indicate a HIGH (1)
 #define FALSE 0			//Allow us to use FALSE to indicate a LOW (0)
-float start, finished;
-float elapsed=0, time=0, speedm=0;
-int bucketcount=0;
+volatile float start, finished;
+volatile float elapsed=0, time=0, speedm=0;
+volatile int bucketcount=0;
+int test;
+
+#define ANEMOMETER_PIN 3
+#define ANEMOMETER_INT 6
+#define VANE_PWR 4
+#define VANE_PIN A0
+#define RAIN_GAUGE_PIN 5
+#define RAIN_GAUGE_INT 2
+
+#define WIND_FACTOR 2.4
+#define TEST_PAUSE 60000
+
+volatile int anem_count = 0;
+volatile unsigned long anem_last = 0;
+volatile unsigned long anem_min = 0xffffffff;
+
+#define RAIN_FACTOR 0.011
+
+volatile unsigned long rain_count = 0;
+volatile unsigned long rain_last = 0;
+
 MPL3115A2 mpl;			//Create an instance of the object
 
 void setup(void)
 {
-   Serial.begin(9600); //Start serial output 9600 Baud
+   Serial.begin(115200); //Start serial output 9600 Baud
    Wire.begin();       //Start i2c Bus
-   attachInterrupt(digitalPinToInterrupt(2), windspeed, RISING); // interrupt called when sensors sends digital 2 high (every anemometer rotation)
-   attachInterrupt(digitalPinToInterrupt(3), rainfall, RISING); // interrupt called when sensors sends digital 3 high (every bucket dump)
-
+   setupWeatherInts();  //Setup our weather instruments
 																 //Humidity and Temperature
    Serial.println("========================");  // just to be sure things are working, print author information
    Serial.println("< Weather Station Data >");
@@ -125,37 +144,157 @@ void loop(void)
 	Serial.println(tempavg,2);					//Print Temp Data
       
 	Serial.print("Rainfall in the Last 24 Hours (in): ");
-	Serial.println(bucketcount*0.011);
+	Serial.println(getUnitRain());
 
 	Serial.print("Wind speed (MPH): ");
-	Serial.println(speedm);
+	Serial.println(getUnitWind());
+	Serial.println(micros());
+
+
+	Serial.print("Wind gust (MPH): ");
+	Serial.println(getGust());
 
 	Serial.print("Wind direction: ");
-	Serial.println(windDir());
-
+	Serial.println(getWindVane());
+	if (test >= 1) {
+		Serial.println("I ran the interrupt.");
+		test = 0;
+	}
 	for (int i = 0; i < 20; i++)
 	{
 		Serial.println();
 		i++;
 	}
 
-	if (millis()>= 8.64e+7)
-	{
-		bucketcount = 0;
-	}
 	delay(1000);								//Will need to rework this delay when we incorporate the physical weather sensors.
 												//	Needs some sort of iterator that allows us to measure the data from the sensor
 }//End Loop
 
+ /*
+
+ This file defines basic functions for Weather Meter readings a description of each function is listed below.
 
 
-void windspeed() {
-	elapsed = (millis() - start) / 1000;
-	start = millis();
-	speedm = 1.429 * 1 / elapsed;
+ ------------------------------------------------------------------------
+
+
+ For more information about these weather sensors, see the data sheet at: https://www.sparkfun.com/datasheets/Sensors/Weather/Weather%20Sensor%20Assembly..pdf
+
+ Anemometer uses a switch which closes once per second for a wind speed of 1.429 MPH
+ Rain gage closes a switch every 0.011" of rain
+ Wind Vane uses a voltage divider with a voltage divider of 10kohms
+
+ Written by Ben Holland for Digital Electronics, PHGN317 at the Colorado School of Mines
+ Nov. 2015
+
+ ******	Change Log	*******
+ 11/30/15
+ Initial Commit
+ ***************************
+
+ */
+
+void setupWeatherInts()
+{
+	pinMode(ANEMOMETER_PIN, INPUT);
+	digitalWrite(ANEMOMETER_PIN, HIGH);  // Turn on the internal Pull Up Resistor
+	pinMode(RAIN_GAUGE_PIN, INPUT);
+	digitalWrite(RAIN_GAUGE_PIN, HIGH);  // Turn on the internal Pull Up Resistor
+	pinMode(VANE_PWR, OUTPUT);
+	digitalWrite(VANE_PWR, LOW);
+	attachInterrupt(INT1, anemometerClick, FALLING);
+	attachInterrupt(INT0, rainGageClick, FALLING);
+	interrupts();
 }
 
-void rainfall() {
-	bucketcount++;
+
+
+double getUnitWind()
+{
+	unsigned long reading = anem_count;
+	Serial.println(anem_count);
+	anem_count = 0;
+	return (WIND_FACTOR*reading) / (TEST_PAUSE / 1000);
 }
 
+double getGust()
+{
+
+	unsigned long reading = anem_min;
+	anem_min = 0xffffffff;
+	double time = reading / 1000000.0;
+
+	return (1 / (reading / 1000000.0))*WIND_FACTOR;
+}
+void anemometerClick()
+{
+	anem_count = 0;
+	long thisTime = micros() - anem_last;
+	anem_last = micros();
+	test = 1;
+	if (thisTime>500)
+	{
+		anem_count++;
+		if (thisTime<anem_min)
+		{
+			anem_min = thisTime;
+		}
+
+	}
+}
+const int vaneValues[] PROGMEM = { 66,84,92,127,184,244,287,406,461,600,631,702,786,827,889,946 };
+const int vaneDirections[] PROGMEM = { 1125,675,900,1575,1350,2025,1800,225,450,2475,2250,3375,0,2925,3150,2700 };
+
+double getWindVane()
+{
+	analogReference(DEFAULT);
+	digitalWrite(VANE_PWR, HIGH);
+	delay(100);
+	for (int n = 0; n<10; n++)
+	{
+		analogRead(VANE_PIN);
+	}
+
+	unsigned int reading = analogRead(VANE_PIN);
+	digitalWrite(VANE_PWR, LOW);
+	unsigned int lastDiff = 2048;
+
+	for (int n = 0; n<16; n++)
+	{
+		int diff = reading - pgm_read_word(&vaneValues[n]);
+		diff = abs(diff);
+		if (diff == 0)
+			return pgm_read_word(&vaneDirections[n]) / 10.0;
+
+		if (diff>lastDiff)
+		{
+			return pgm_read_word(&vaneDirections[n - 1]) / 10.0;
+		}
+
+		lastDiff = diff;
+	}
+
+	return pgm_read_word(&vaneDirections[15]) / 10.0;
+
+}
+
+
+double getUnitRain()
+{
+
+	unsigned long reading = rain_count;
+	rain_count = 0;
+	double unit_rain = reading*RAIN_FACTOR;
+
+	return unit_rain;
+}
+
+void rainGageClick()
+{
+	long thisTime = micros() - rain_last;
+	rain_last = micros();
+	if (thisTime>500)
+	{
+		rain_count++;
+	}
+}
