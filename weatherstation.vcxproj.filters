@@ -16,9 +16,13 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="weatherstation.ino" />
+    <None Include="HIH_6130.ino" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="__vm\.weatherstation.vsarduino.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="HIH_6130.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
