@@ -24,13 +24,6 @@ based on code from Peter H Anderson, Baltimore, MD, Nov, '11 (http://www.phander
 
 Edited and rewritten by Ben Holland for Digital Electronics, PHGN317 at the Colorado School of Mines
 Nov. 2015
-
-******	Change Log	*******
-11/29/15 
-	Added Comments of how the function from Peter Anderson work. 
-	Rewrote some confusing parts to be easier to understand.
-***************************
-
 */
 
 /*
